@@ -1,39 +1,208 @@
 import { useState, useEffect, useRef } from 'react'
 import { mockChats } from '../mocks/data'
 import ReactLoading from 'react-loading'
+import axios from 'axios'
+import { toast } from 'react-toastify'
+import { Client } from '@stomp/stompjs'
+import SockJS from 'sockjs-client'
 
 function Chat() {
     const [messages, setMessages] = useState([])
     const [newMessage, setNewMessage] = useState('')
     const [loading, setLoading] = useState(true)
     const messagesEndRef = useRef(null)
+    const [stompClient, setStompClient] = useState(null)
+    const [sessionId, setSessionId] = useState(null)
 
+    // STOMP 연결 설정
     useEffect(() => {
-        const timer = setTimeout(() => {
-            setMessages(mockChats)
-            setLoading(false)
-        }, 1000)
+        const socket = new SockJS('http://localhost:8070/ws/chat');
+        const client = new Client({
+            webSocketFactory: () => socket,
+            debug: function (str) {
+                console.log(str)
+            },
+            reconnectDelay: 5000,
+            heartbeatIncoming: 4000,
+            heartbeatOutgoing: 4000,
+            onConnect: () => {
+                console.log('STOMP 연결 성공');
 
-        return () => clearTimeout(timer)
-    }, [])
+                const fullUrl = client.webSocket._transport.url;
+                const urlParts = fullUrl.split('/');
+                const sid = urlParts[urlParts.length - 2];
 
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [messages])
+                setLoading(false);
+                setSessionId(sid);
 
-    const handleSubmit = (e) => {
-        e.preventDefault()
-        if (!newMessage.trim()) return
+                const subscription = client.subscribe('/topic/ai', (message) => {
+                    console.log('메시지 수신:', message.body);
+                    const receivedMessage = JSON.parse(message.body);
+                    setMessages(prev => {
+                        // 중복 체크: 이미 같은 id의 메시지가 있으면 이전 상태 그대로 반환
+                        if (prev.some(msg => msg.id === receivedMessage.id)) {
+                            return prev;
+                        }
+                        return [...prev, {
+                            id: receivedMessage.id,
+                            content: receivedMessage.aiResponse,
+                            createdAt: receivedMessage.createDate,
+                            isMyMessage: false,
+                            sender: 'AI'
+                        }];
+                    });
+                });
 
-        const newChat = {
-            id: `msg${messages.length + 1}`,
-            content: newMessage,
-            createdAt: new Date().toISOString(),
-            isMyMessage: true,
+                client.mySubscription = subscription;
+            },
+        });
+
+        try {
+            client.activate();
+            setStompClient(client);
+        } catch (error) {
+            console.error('STOMP 활성화 에러:', error);
+            setLoading(false);
         }
 
-        setMessages([...messages, newChat])
-        setNewMessage('')
+        return () => {
+            if (client.mySubscription) {
+                client.mySubscription.unsubscribe();
+            }
+            if (client.connected) {
+                client.deactivate();
+            }
+        };
+    }, []);
+    // useEffect(() => {
+    //     const socket = new SockJS('http://localhost:8070/ws/chat')
+    //     const client = new Client({
+    //         webSocketFactory: () => socket,
+    //         debug: function (str) {
+    //             console.log(str)
+    //         },
+    //         reconnectDelay: 5000,
+    //         heartbeatIncoming: 4000,
+    //         heartbeatOutgoing: 4000,
+    //         onConnect: () => {
+    //             console.log('Connected to STOMP')
+    //             const fullUrl = client.webSocket._transport.url;
+    //             console.log('Full WebSocket URL:', fullUrl);  // URL 확인용
+
+    //             // URL에서 실제 세션ID 추출 (마지막에서 두 번째 부분)
+    //             const urlParts = fullUrl.split('/');
+    //             const sid = urlParts[urlParts.length - 2];
+    //             console.log('Extracted Session ID:', sid);
+
+    //             setSessionId(sid)
+    //             setLoading(false)  // 여기에 추가
+
+    //             // 구독 경로를 백엔드와 일치시킴
+    //             client.subscribe('/topic/ai', (message) => {
+    //                 console.log('Received message:', message);
+    //                 console.log('Message body:', message.body);
+
+    //                 const receivedMessage = JSON.parse(message.body)
+    //                 console.log('Parsed message:', receivedMessage);
+
+    //                 setMessages(prev => [...prev, {
+    //                     id: receivedMessage.id,
+    //                     content: receivedMessage.aiResponse,  // aiResponse 필드 사용
+    //                     createdAt: receivedMessage.createDate,
+    //                     isMyMessage: false,
+    //                     sender: 'AI'
+    //                 }])
+    //             })
+    //         },
+    //         onStompError: (frame) => {
+    //             console.error('STOMP error:', frame)
+    //             toast.error('채팅 서버 연결에 실패했습니다')
+    //         }
+    //     })
+
+    //     client.activate()
+    //     setStompClient(client)
+
+    //     return () => {
+    //         if (client.connected) {
+    //             client.deactivate()
+    //         }
+    //     }
+    // }, [])
+
+    // useEffect(() => {
+    //     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // }, [messages])
+
+    // const handleSubmit = async (e) => {
+    //     e.preventDefault()
+    //     if (!newMessage.trim() || !sessionId) return
+
+    //     try {
+    //         // 내 메시지 추가
+    //         const myMessage = {
+    //             id: `msg${messages.length + 1}`,
+    //             content: newMessage,
+    //             createdAt: new Date().toISOString(),
+    //             isMyMessage: true,
+    //             sender: 'Me'
+    //         }
+    //         setMessages(prev => [...prev, myMessage])
+
+    //         console.log('Sending message:', {
+    //             message: newMessage,
+    //             sessionId: sessionId
+    //         });
+
+    //         await axios.post('http://localhost:8070/api/v1/chat',
+    //             {
+    //                 message: newMessage,
+    //                 sessionId: sessionId
+    //             }
+    //         );
+
+    //         setNewMessage('')
+    //     } catch (error) {
+    //         console.error('Error details:', error.response || error);
+    //         toast.error('메시지 전송에 실패했습니다')
+    //     }
+    // }
+    const handleSubmit = async (e) => {
+        e.preventDefault()
+        if (!newMessage.trim() || !sessionId) return
+
+        console.log('handleSubmit 시작'); // 추가
+
+        try {
+            // 내 메시지 추가
+            const myMessage = {
+                id: `msg${messages.length + 1}`,
+                content: newMessage,
+                createdAt: new Date().toISOString(),
+                isMyMessage: true,
+                sender: 'Me'
+            }
+            setMessages(prev => [...prev, myMessage])
+
+            console.log('POST 요청 전:', {
+                message: newMessage,
+                sessionId: sessionId
+            });
+
+            const response = await axios.post('http://localhost:8070/api/v1/chat/ai',
+                {
+                    message: newMessage,
+                    sessionId: sessionId
+                }
+            );
+
+            console.log('POST 요청 응답:', response); // 추가
+
+            setNewMessage('')
+        } catch (error) {
+            console.error('Error details:', error.response || error);
+            toast.error('메시지 전송에 실패했습니다')
+        }
     }
 
     if (loading) {
@@ -62,16 +231,16 @@ function Chat() {
                         {messages.map((message) => (
                             <div
                                 key={message.id}
-                                className={`flex ${
-                                    message.isMyMessage ? 'justify-end' : 'justify-start'
-                                } items-end space-x-2`}
+                                className={`flex ${message.isMyMessage ? 'justify-end' : 'justify-start'} items-end space-x-2`}
                             >
+                                {!message.isMyMessage && (
+                                    <span className="text-sm text-gray-500">{message.sender}</span>
+                                )}
                                 <div
-                                    className={`max-w-[70%] ${
-                                        message.isMyMessage
-                                            ? 'bg-indigo-500 text-white rounded-l-lg rounded-tr-lg'
-                                            : 'bg-white text-gray-800 rounded-r-lg rounded-tl-lg'
-                                    } p-3 shadow-md`}
+                                    className={`max-w-[70%] ${message.isMyMessage
+                                        ? 'bg-indigo-500 text-white rounded-l-lg rounded-tr-lg'
+                                        : 'bg-white text-gray-800 rounded-r-lg rounded-tl-lg'
+                                        } p-3 shadow-md`}
                                 >
                                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                                     <p className="text-xs text-right mt-1 opacity-75">

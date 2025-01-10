@@ -14,12 +14,13 @@ function ChatRoomList() {
     const fetchChatRooms = async () => {
         try {
             const response = await axios.get('http://localhost:8070/api/v1/chat/rooms')
-            setChatRooms(response.data)
+            if (response.data.success) {
+                setChatRooms(response.data.data)
+            }
         } catch (error) {
             console.error('Error fetching chat rooms:', error)
             setChatRooms(mockChatRooms)
             toast.warning('테스트 데이터를 표시합니다.')
-            // toast.error('채팅방 목록을 불러오는데 실패했습니다.')
         } finally {
             setLoading(false)
         }
@@ -35,12 +36,15 @@ function ChatRoomList() {
 
         try {
             setCreating(true)
-            await axios.post('http://localhost:8070/api/v1/chat/rooms', {
+            const response = await axios.post('http://localhost:8070/api/v1/chat/rooms', {
                 name: newRoomName,
             })
-            setNewRoomName('')
-            toast.success('채팅방이 생성되었습니다.')
-            fetchChatRooms() // 목록 새로고침
+
+            if (response.data.success) {
+                setNewRoomName('')
+                toast.success('채팅방이 생성되었습니다.')
+                fetchChatRooms()
+            }
         } catch (error) {
             toast.error('채팅방 생성에 실패했습니다.')
             console.error('Error creating chat room:', error)
@@ -62,7 +66,6 @@ function ChatRoomList() {
 
     return (
         <div className="container mx-auto px-4 py-8">
-            {/* 채팅방 생성 폼 */}
             <form onSubmit={handleCreateRoom} className="mb-8">
                 <div className="flex gap-2">
                     <input
@@ -83,7 +86,6 @@ function ChatRoomList() {
                 </div>
             </form>
 
-            {/* 채팅방 목록 */}
             <div className="space-y-4">
                 {chatRooms.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">생성된 채팅방이 없습니다.</p>
@@ -103,7 +105,7 @@ function ChatRoomList() {
                                 </div>
                                 <div className="text-right">
                                     <span className="text-sm text-gray-500">
-                                        {new Date(room.createdAt).toLocaleDateString()}
+                                        {new Date(room.createDate).toLocaleDateString()}
                                     </span>
                                     {room.participantCount && (
                                         <p className="text-xs text-gray-400 mt-1">참여자 {room.participantCount}명</p>
